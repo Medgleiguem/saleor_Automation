@@ -1,13 +1,26 @@
 - name: Get all products from Saleor and save to CSV
   hosts: localhost
   gather_facts: no
+
+  vars_files:
+    - env_vars.yml
+
   vars:
-    saleor_api_url: "https://saleor.signusk.com/graphql/"
-    saleor_token: "juwfFSI5F9AHNlKtBxghlclfc3fWWX"
-    output_csv: "./products.csv"
-    output_json: "../output/products.json"
-    max_pages: 6 # Safety limit to prevent infinite loops
+    saleor_api_url: "{{ SALEOR_API_URL }}"
+    saleor_token: "{{ SALEOR_TOKEN }}"
+    output_csv: "{{ OUTPUT_CSV }}"
+    output_json: "{{ OUTPUT_JSON }}"
+    max_pages: "{{ MAX_PAGES | int }}"
   tasks:
+    - name: Debug vars
+      debug:
+        msg:
+          - "URL: {{ saleor_api_url }}"
+          - "Token: {{ saleor_token }}"
+          - "CSV: {{ output_csv }}"
+          - "JSON: {{ output_json }}"
+          - "Max pages: {{ max_pages }}"
+
     - name: Initialize pagination variables
       set_fact:
         has_next_page: true
@@ -16,7 +29,7 @@
 
     - name: Fetch all products with pagination
       include_tasks: fetch_products.yml
-      loop: "{{ range(0, max_pages) | list }}"
+      loop: "{{ range(0, max_pages | int) | list }}" # Apply | int here
       when: has_next_page
       register: pagination_results
 

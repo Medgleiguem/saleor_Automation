@@ -1,0 +1,7 @@
+# vars.env.yml
+SALEOR_API_URL: "https://saleor.signusk.com/graphql/"
+SALEOR_TOKEN: "juwfFSI5F9AHNlKtBxghlclfc3fWWX"
+OUTPUT_CSV: "./products.csv"
+OUTPUT_JSON: "../output/products.json"
+PRODUCTS_FILE: "../input/products_export.json"
+MAX_PAGES: 6
