@@ -1,0 +1,101 @@
+- name: Fetch products page
+  uri:
+    url: "{{ saleor_api_url }}"
+    method: POST
+    headers:
+      Authorization: "Bearer {{ saleor_token }}"
+      Content-Type: "application/json"
+    body_format: json
+    body:
+      query: |
+        query($after: String) {
+          products(first: 100, after: $after) {
+            pageInfo {
+              hasNextPage
+              endCursor
+            }
+            edges {
+              node {
+                id
+                name
+                description
+                category {
+                  id
+                }
+                productType {
+                  id
+                }
+                variants {
+                  id
+                  name
+                  channelListings {
+                    channel {
+                      id
+                      name
+                    }
+                    price {
+                      amount
+                      currency
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      variables:
+        after: "{{ end_cursor }}"
+  register: saleor_response
+  no_log: true
+  ignore_errors: yes
+
+- name: Process successful response with products data
+  set_fact:
+    current_products: "{{ saleor_response.json.data.products.edges | map(attribute='node') | default([]) | list }}"
+    has_next_page: "{{ saleor_response.json.data.products.pageInfo.hasNextPage | default(false) }}"
+    end_cursor: "{{ saleor_response.json.data.products.pageInfo.endCursor | default(null) }}"
+  # no_log: true
+  when:
+    - not saleor_response.failed
+    - saleor_response.json is defined
+    - saleor_response.json.data is defined
+    - saleor_response.json.data.products is defined
+
+- name: Transform product data into desired format
+  set_fact:
+    transformed_products: >-
+      {%- set result = [] -%}
+      {%- for item in current_products -%}
+      {%- set variants = [] -%}
+      {%- for variant in item.variants | default([]) -%}
+        {%- set channels = [] -%}
+        {%- for channel in variant.channelListings | default([]) -%}
+          {%- set _ = channels.append({
+            "channel_id": channel.channel.id | default("unknown-channel"),
+            "channel_name": channel.channel.name | default("Unnamed Channel"),
+            "price": channel.price.amount | default(0.0),
+            "currency": channel.price.currency | default("USD")
+          }) -%}
+        {%- endfor -%}
+        {%- set _ = variants.append({
+          "variant_id": variant.id | default("unknown-variant"),
+          "variant_name": variant.name | default("Unnamed Variant"),
+          "channelListings": channels
+        }) -%}
+      {%- endfor -%}
+      {%- set _ = result.append({
+        "id": item.id | default("unknown-id"),
+        "name": item.name | default("Unnamed Product"),
+        "description": item.description | default("No description available"),
+        "category_id": item.category.id | default("unknown-category"),
+        "product_type_id": item.productType.id | default("unknown-product-type"),
+        "variants": variants
+      }) -%}
+      {%- endfor -%}
+      {{ result }}
+  when: current_products is defined
+
+- name: Append transformed products to global list
+  set_fact:
+    all_products: "{{ all_products | default([]) + transformed_products }}"
+  # no_log: true

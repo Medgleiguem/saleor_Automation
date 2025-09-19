@@ -1,0 +1,124 @@
+---
+- name: Update products and variants in Saleor
+  hosts: localhost
+  gather_facts: no
+  vars:
+    saleor_api_url: "https://saleor.signusk.com/graphql/"
+    saleor_token: "juwfFSI5F9AHNlKtBxghlclfc3fWWX"
+    products_file: "../input/products_export.json"
+
+  tasks:
+    - name: Load products JSON file
+      ansible.builtin.slurp:
+        src: "{{ products_file }}"
+      register: raw_products
+
+    - name: Parse products JSON
+      set_fact:
+        products: "{{ raw_products.content | b64decode | from_json }}"
+
+    - name: Update product details
+      uri:
+        url: "{{ saleor_api_url }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ saleor_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          query: |
+            mutation updateProduct($id: ID!, $input: ProductInput!) {
+              productUpdate(id: $id, input: $input) {
+                product {
+                  id
+                  name
+                  description
+                  category {
+                    id
+                  }
+                }
+                errors {
+                  field
+                  message
+                }
+              }
+            }
+          variables:
+            id: "{{ item.id }}"
+            input:
+              name: "{{ item.name }}"
+              description: "{{ item.description | string }}"
+              category: "{{ item.category_id }}"
+      loop: "{{ products }}"
+      loop_control:
+        loop_var: item
+      register: product_updates
+
+    - name: Update variant names
+      uri:
+        url: "{{ saleor_api_url }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ saleor_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body:
+          query: |
+            mutation updateVariant($id: ID!, $input: ProductVariantInput!) {
+              productVariantUpdate(id: $id, input: $input) {
+                productVariant {
+                  id
+                  name
+                }
+                errors {
+                  field
+                  message
+                }
+              }
+            }
+          variables:
+            id: "{{ variant.variant_id }}"
+            input:
+              name: "{{ variant.variant_name }}"
+      loop: "{{ products | map(attribute='variants') | sum(start=[]) }}"
+      loop_control:
+        loop_var: variant
+      register: variant_name_updates
+
+    - name: Load products from JSON
+      slurp:
+        src: "{{ products_file }}"
+      register: products_json
+
+    - name: Parse JSON content
+      set_fact:
+        products: "{{ products_json.content | b64decode | from_json }}"
+
+    - name: Update variant prices per channel
+      uri:
+        url: "{{ saleor_api_url }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ saleor_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: |
+          {
+            "query": "mutation updateVariantChannel($id: ID!, $input: [ProductVariantChannelListingAddInput!]!) { productVariantChannelListingUpdate(id: $id, input: $input) { productChannelListingErrors { field message } } }",
+            "variables": {
+              "id": "{{ variant.variant_id }}",
+              "input": [
+                {% for cl in variant.channelListings %}
+                {
+                  "channelId": "{{ cl.channel_id }}",
+                  "price": {{ cl.price }}
+                }{% if not loop.last %},{% endif %}
+                {% endfor %}
+              ]
+            }
+          }
+
+      loop: "{{ products | map(attribute='variants') | sum(start=[]) }}"
+      loop_control:
+        loop_var: variant
+      register: variant_price_updates

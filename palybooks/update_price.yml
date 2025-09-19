@@ -1,0 +1,50 @@
+- name: Update Saleor variant prices from JSON
+  hosts: localhost
+  gather_facts: no
+  vars:
+    saleor_api_url: "https://saleor.signusk.com/graphql/"
+    saleor_token: "juwfFSI5F9AHNlKtBxghlclfc3fWWX"
+    products_file: "./products_export.json"
+
+  tasks:
+    - name: Load products from JSON
+      slurp:
+        src: "{{ products_file }}"
+      register: products_json
+
+    - name: Parse JSON content
+      set_fact:
+        products: "{{ products_json.content | b64decode | from_json }}"
+
+    - name: Update variant prices per channel
+      uri:
+        url: "{{ saleor_api_url }}"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ saleor_token }}"
+          Content-Type: "application/json"
+        body_format: json
+        body: |
+          {
+            "query": "mutation updateVariantChannel($id: ID!, $input: [ProductVariantChannelListingAddInput!]!) { productVariantChannelListingUpdate(id: $id, input: $input) { productChannelListingErrors { field message } } }",
+            "variables": {
+              "id": "{{ variant.variant_id }}",
+              "input": [
+                {% for cl in variant.channelListings %}
+                {
+                  "channelId": "{{ cl.channel_id }}",
+                  "price": {{ cl.price }}
+                }{% if not loop.last %},{% endif %}
+                {% endfor %}
+              ]
+            }
+          }
+
+      loop: "{{ products | map(attribute='variants') | sum(start=[]) }}"
+      loop_control:
+        loop_var: variant
+      register: variant_price_updates
+
+    - name: Show update results
+      debug:
+        var: variant_price_updates

@@ -1,0 +1,85 @@
+- name: Get all products from Saleor and save to CSV
+  hosts: localhost
+  gather_facts: no
+  vars:
+    saleor_api_url: "https://saleor.signusk.com/graphql/"
+    saleor_token: "juwfFSI5F9AHNlKtBxghlclfc3fWWX"
+    output_csv: "./products.csv"
+    output_json: "../output/products.json"
+    max_pages: 6 # Safety limit to prevent infinite loops
+  tasks:
+    - name: Initialize pagination variables
+      set_fact:
+        has_next_page: true
+        end_cursor: null
+        all_products: []
+
+    - name: Fetch all products with pagination
+      include_tasks: fetch_products.yml
+      loop: "{{ range(0, max_pages) | list }}"
+      when: has_next_page
+      register: pagination_results
+
+    - name: Debug - Show total products collected
+      debug:
+        msg: "Total products collected: {{ all_products | length }}"
+
+    # - name: Debug all_products
+    #   debug:
+    #     var: all_products
+    #     verbosity: 3
+
+    # - name: Debug first result structure
+    #   debug:
+    #     msg: "First result: {{ all_products[0] | to_nice_json }}"
+    #     verbosity: 3
+
+    # - name: Prepare CSV lines
+    #   set_fact:
+    #     csv_lines: >-
+    #       id,name,description,price_start,price_stop,currency
+    #       {% for p in all_products %}
+    #       "{{ p.id }}","{{ p.name | replace('\"', '\"\"') }}","{{ p.description | default('') | replace('\"', '\"\"') | regex_replace('\n', ' ') }}","{{ p.pricing.priceRange.start.gross.amount if p.pricing and p.pricing.priceRange and p.pricing.priceRange.start else '' }}","{{ p.pricing.priceRange.stop.gross.amount if p.pricing and p.pricing.priceRange and p.pricing.priceRange.stop else '' }}","{{ p.pricing.priceRange.start.gross.currency if p.pricing and p.pricing.priceRange and p.pricing.priceRange.start else '' }}"
+    #       {% endfor %}
+
+    # - name: Write products to CSV file
+    #   copy:
+    #     dest: "{{ output_csv }}"
+    #     content: "{{ csv_lines | trim }}"
+
+    - name: Read existing products JSON file (if exists)
+      slurp:
+        src: "{{ output_json }}"
+      register: existing_json
+      ignore_errors: yes
+
+    - name: Set existing products fact
+      set_fact:
+        existing_products: >-
+          {% if existing_json is defined and existing_json.content is defined and existing_json.content != '' %}
+            {{ existing_json.content | b64decode | from_json }}
+          {% else %}
+            []
+          {% endif %}
+
+    - name: Merge new products with existing products (by id)
+      set_fact:
+        merged_products: >-
+          {{
+            (
+              (existing_products | selectattr('id', 'defined') | list)
+              +
+              (all_products | selectattr('id', 'defined') | list)
+            )
+            | unique(attribute='id')
+          }}
+      no_log: true
+
+    - name: Prepare pretty JSON
+      set_fact:
+        products_json: "{{ merged_products | to_nice_json(indent=2) }}"
+      no_log: true
+    - name: Write merged products to JSON file
+      copy:
+        dest: "{{ output_json }}"
+        content: "{{ products_json }}"
